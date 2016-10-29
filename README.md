@@ -10,20 +10,33 @@ Put TimeSlot in ~/Documents/Arduino/libraries (or corresponding place in your OS
 ```c++
 #include <limits.h>
 #include "TimeSlot.h"
+#include <Servo.h>
 
 const int cpupin = 13;
 const int buttonpin = 2;
 const int ledpin = 10;
 const int blinkpin = 11;
+const int servopin = 5;
 
-// This takes care of mechanical bounce too, as it's not checked in a tight loop.
+class ClickEventListenerIF {
+public:
+    virtual void click(char state) = 0; // HIGH LOW
+};
+
 class myButton : public TimeSlotButton
 {
 public:
     int m_ledpin;
-    myButton(int pin, int ledpin) : TimeSlotButton(pin), m_ledpin(ledpin) {}
+    ClickEventListenerIF *m_click_event_listener;
+    myButton(int pin, int ledpin, ClickEventListenerIF *listener=0)
+      : TimeSlotButton(pin), m_ledpin(ledpin), m_click_event_listener(listener) {}
     void setup() {
         pinMode(ledpin, OUTPUT);
+    }
+    void on() {
+        if (0 != m_click_event_listener) {
+            m_click_event_listener->click(HIGH);
+        }
     }
     void onoff() {
         digitalWrite(ledpin, m_state);
@@ -49,18 +62,63 @@ public:
     }
 };
 
-// You can add tasks dynamically too. This is the list of static tasks.
+class ServoSweep : public TimeSlotChildIF, public ClickEventListenerIF
+{
+public:
+    char m_state;
+    char m_outpin;
+    int m_degree;
+    Servo *m_servo;
+    ServoSweep(char outpin) : m_state(0), m_outpin(outpin) {
+        m_servo = new Servo();
+        m_degree = 10;
+    }
+    void setup() {
+        pinMode(m_outpin, OUTPUT);
+        m_servo->attach(m_outpin);
+        m_servo->write(m_degree);
+    }
+    void click(char state) {
+        if (m_state != 0 || state != HIGH) {
+        //    return;
+        }
+        m_state = 1;
+    }
+    int tick() {
+        if (1 == m_state) {
+            m_degree++;
+            m_degree++;
+            m_servo->write(m_degree);
+            if (170 <= m_degree) {
+                m_state = -1;
+            }
+        } else if(-1 == m_state) {
+            m_degree--;
+            m_degree--;
+            m_servo->write(m_degree);
+            if (10 >= m_degree) {
+                m_state = 0;
+            }
+        }
+        return 1;
+    }
+
+};
+
+
+ServoSweep *servoSweep = new ServoSweep(servopin);
 TimeSlotChildIF *tasklist[] = {
-    new myButton(buttonpin, ledpin),
+    servoSweep,
+    new myButton(buttonpin, ledpin, (ClickEventListenerIF *)servoSweep),
     new blinker(blinkpin,50),
     NULL
 };
 
 void setup()
 {
-    // if set, the timeslot loop raises this pin when working. Then you can see in your dso how much cpu is used.
     TimeSlot::m_cpupin = cpupin;
     TimeSlot::setup(tasklist);
+    Serial.begin(9600);
 }
 
 int ledstate = 0;
@@ -69,4 +127,5 @@ void loop()
 {
     TimeSlot::loop(tasklist);
 }
+
 ```
